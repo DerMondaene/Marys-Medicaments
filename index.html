@@ -1,197 +1,990 @@
-<!-- ... existing code ... -->
-        // --- GAME LOGIC ---
-        function updateGame() {
-            if (gameState.gameOver || gameState.paused) return;
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mary's Medicaments - LCD Handheld Game</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for Retro LCD / Handheld aesthetic -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-            gameState.tick++;
-
-            // Spawn medications
-            if (gameState.tick % gameState.spawnInterval === 0) {
-                spawnMedication();
-            }
-
-            // Move medications along conveyors
-            if (gameState.tick % gameState.conveyorSpeed === 0) {
-                moveConveyors();
-            }
-
-            // Update senior patience
-            if (gameState.tick % 60 === 0) { // check every ~1 sec
-                updateSeniors();
-            }
-
-            // Try automatic catch on every frame if Mary is standing at the conveyor end
-            checkAutoCatch();
-
-            // Increase difficulty over time
-            if (gameState.tick % 600 === 0 && gameState.conveyorSpeed > 15) {
-                gameState.conveyorSpeed--;
-                playSound(600, 0.05, 'triangle');
-            }
-
-            render();
+    <style>
+        body {
+            font-family: 'Press Start 2P', monospace;
+            background: #0f1016;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
-        function checkAutoCatch() {
-            // If Mary is on left side and her hands are empty, check if item reached end of her current lane
-            if (gameState.maryPos.side === 'LEFT' && gameState.heldItem === null) {
-                const lane = gameState.maryPos.lane;
-                const itemsInLane = gameState.conveyors[lane];
-                // Item at end of conveyor is at pos 3
-                const caughtIdx = itemsInLane.findIndex(item => item.pos === 3);
-                if (caughtIdx !== -1) {
-                    catchItem(lane, caughtIdx);
-                }
-            }
+        .font-lcd {
+            font-family: 'VT323', monospace;
         }
 
-        function spawnMedication() {
-            // Find lanes that don't have item at pos 0
-            const availableLanes = [];
-            for (let i = 0; i < 4; i++) {
-                if (!gameState.conveyors[i].some(item => item.pos === 0)) {
-                    availableLanes.push(i);
-                }
-            }
-            if (availableLanes.length === 0) return;
-
-            const lane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
-            const type = MED_TYPES[Math.floor(Math.random() * MED_TYPES.length)];
-
-            gameState.conveyors[lane].push({
-                type: type,
-                pos: 0
-            });
-            playSound(300, 0.04, 'sine');
+        /* LCD Screen Bevel & Plastic Handheld Casing */
+        .handheld-body {
+            background: linear-gradient(145deg, #c0392b, #8e1b19);
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.4),
+                        inset 0 -4px 8px rgba(0,0,0,0.6),
+                        0 20px 40px rgba(0,0,0,0.8);
+            border: 4px solid #610d0c;
         }
 
-        function moveConveyors() {
-            for (let l = 0; l < 4; l++) {
-                const lane = gameState.conveyors[l];
-                for (let i = lane.length - 1; i >= 0; i--) {
-                    lane[i].pos++;
-                    // If medication falls off end of conveyor without being caught
-                    if (lane[i].pos > 3) {
-                        lane.splice(i, 1);
-                        loseLife("Pill dropped!");
-                        playSound(150, 0.3, 'sawtooth');
-                    }
-                }
-            }
-
-            // Re-check auto catch immediately after conveyor movement
-            checkAutoCatch();
+        .gold-plate {
+            background: linear-gradient(135deg, #e3c16f 0%, #b8933b 50%, #8c671b 100%);
+            border: 2px solid #4a350a;
         }
 
-        function updateSeniors() {
-            for (let i = 0; i < 4; i++) {
-                const s = gameState.seniors[i];
-                if (s.active) {
-                    s.patience--;
-                    if (s.patience <= 0) {
-                        // Senior ran out of patience!
-                        s.active = false;
-                        loseLife(`Senior on Lane ${i+1} ran out of patience!`);
-                        playSound(180, 0.4, 'sawtooth');
-                        // Spawn new request after delay
-                        setTimeout(() => spawnSeniorRequest(i), 3000);
-                    }
-                } else {
-                    // Chance to request medication if empty
-                    if (Math.random() < 0.3) {
-                        spawnSeniorRequest(i);
-                    }
-                }
-            }
+        .lcd-screen-bg {
+            background-color: #9ea886;
+            background-image: 
+                linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+            background-size: 4px 4px;
+            box-shadow: inset 3px 3px 10px rgba(0,0,0,0.4), inset -2px -2px 6px rgba(255,255,255,0.2);
+            border: 10px solid #23201d;
         }
 
-        function spawnSeniorRequest(lane) {
-            if (gameState.gameOver) return;
-            gameState.seniors[lane] = {
-                active: true,
-                med: MED_TYPES[Math.floor(Math.random() * MED_TYPES.length)],
-                patience: 15 // 15 seconds
-            };
-            playSound(523, 0.1, 'sine');
+        /* LCD Segment Styles */
+        .lcd-ghost {
+            opacity: 0.07;
+            color: #1a2012;
         }
 
-        function catchItem(lane, itemIndex) {
-            const item = gameState.conveyors[lane][itemIndex];
-            gameState.heldItem = item.type;
-            gameState.conveyors[lane].splice(itemIndex, 1);
-            playSound(800, 0.1, 'square');
-            render();
+        .lcd-active {
+            opacity: 0.95;
+            color: #0d1408;
+            text-shadow: 0 0 1px rgba(13, 20, 8, 0.6);
+            filter: drop-shadow(0px 1px 0px rgba(255,255,255,0.3));
         }
 
-        function tryCatchOrDeliver() {
-            if (gameState.gameOver) return;
+        @keyframes blinkFast {
+            0%, 100% { opacity: 0.95; }
+            50% { opacity: 0.15; }
+        }
 
-            if (gameState.maryPos.side === 'LEFT') {
-                // Manual catch attempt
-                if (gameState.heldItem !== null) return; // Tray full
+        .lcd-warning {
+            animation: blinkFast 0.4s infinite;
+            color: #1a0505;
+        }
 
-                const lane = gameState.maryPos.lane;
-                const itemsInLane = gameState.conveyors[lane];
-                // Can catch if at position 3 (end of belt) or position 2 (close)
-                const caughtIdx = itemsInLane.findIndex(item => item.pos >= 2);
-                if (caughtIdx !== -1) {
-                    catchItem(lane, caughtIdx);
-                } else {
-                    playSound(200, 0.05, 'square'); // Miss sound
-                }
-            } else {
-                // RIGHT side: Deliver medicine to Senior
-                if (gameState.heldItem === null) return; // Nothing to deliver
+        /* Retro Handheld Rubber Buttons */
+        .btn-retro {
+            background: linear-gradient(180deg, #3a3b3c, #1f2021);
+            box-shadow: 0 4px 0 #0d0d0e, 0 5px 8px rgba(0,0,0,0.5);
+            transition: all 0.05s ease;
+        }
 
-                const lane = gameState.maryPos.lane;
-                const senior = gameState.seniors[lane];
+        .btn-retro:active, .btn-retro.active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 #0d0d0e, 0 2px 4px rgba(0,0,0,0.5);
+        }
 
-                if (senior.active && senior.med === gameState.heldItem) {
-                    // Correct delivery!
-                    gameState.score += 10;
-                    document.getElementById('lcd-score').textContent = String(gameState.score).padStart(4, '0');
-                    senior.active = false;
-                    gameState.heldItem = null;
-                    playSound(1046, 0.15, 'triangle');
+        .btn-red {
+            background: linear-gradient(180deg, #e74c3c, #c0392b);
+            box-shadow: 0 4px 0 #7b241c, 0 5px 8px rgba(0,0,0,0.5);
+        }
+        .btn-red:active, .btn-red.active {
+            transform: translateY(3px);
+            box-shadow: 0 1px 0 #7b241c, 0 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .btn-small {
+            background: linear-gradient(180deg, #dddddd, #aaaaaa);
+            box-shadow: 0 2px 0 #666666;
+        }
+        .btn-small:active {
+            transform: translateY(2px);
+            box-shadow: 0 0px 0 #666666;
+        }
+
+        .scanlines {
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.04) 50%
+            );
+            background-size: 100% 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-2 sm:p-4 text-slate-900 select-none">
+
+    <!-- GAME CONTAINER / HANDHELD CASING -->
+    <div class="handheld-body relative w-full max-w-4xl rounded-3xl p-4 sm:p-7 flex flex-col items-center">
+        
+        <!-- TOP BRANDING PLATE -->
+        <div class="gold-plate w-full rounded-lg py-2 px-4 mb-3 flex justify-between items-center text-amber-950 shadow-md">
+            <div class="flex items-center space-x-2">
+                <span class="text-[10px] sm:text-xs font-bold tracking-widest uppercase">GAME & WATCH</span>
+                <span class="text-[8px] sm:text-[10px] bg-amber-950 text-amber-200 px-1.5 py-0.5 rounded">WIDE SCREEN</span>
+            </div>
+            <h1 class="text-xs sm:text-lg font-extrabold tracking-wider text-center drop-shadow-sm">Mary's Medicaments</h1>
+            <div class="text-[9px] sm:text-xs font-bold tracking-tight opacity-90">
+                LCD HANDHELD SIMULATOR
+            </div>
+        </div>
+
+        <!-- LCD SCREEN DISPLAY -->
+        <div class="relative w-full lcd-screen-bg rounded-xl overflow-hidden p-3 sm:p-5 flex flex-col justify-between h-[380px] sm:h-[480px]">
+            <div class="absolute inset-0 scanlines pointer-events-none z-20"></div>
+
+            <!-- LCD HEADER BAR (Score, Level, 8 Lives) -->
+            <div class="relative z-10 flex justify-between items-center border-b-2 border-slate-800/20 pb-2">
+                <div>
+                    <span id="game-mode-text" class="text-xs sm:text-sm font-lcd tracking-widest font-bold text-slate-800">GAME A</span>
+                    <div id="speed-level-text" class="text-[8px] sm:text-[10px] text-slate-700 font-sans font-bold">SPEED: LVL 1</div>
+                </div>
+
+                <!-- 8 LIVES LCD DISPLAY -->
+                <div class="flex flex-col items-center">
+                    <span class="text-[8px] sm:text-[10px] font-bold text-slate-800 mb-0.5">MISS / LIVES</span>
+                    <div id="lives-container" class="grid grid-cols-4 gap-1 text-xs sm:text-base">
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-0"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-1"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-2"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-3"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-4"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-5"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-6"></i>
+                        <i class="fa-solid fa-heart-crack lcd-ghost" id="life-7"></i>
+                    </div>
+                </div>
+
+                <!-- SCORE DISPLAY -->
+                <div class="text-right">
+                    <div class="text-[8px] sm:text-[10px] font-bold text-slate-700">SCORE / BEST</div>
+                    <div class="font-lcd text-2xl sm:text-4xl tracking-widest text-slate-900 leading-none">
+                        <span id="score-display">0000</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MAIN PLAYFIELD -->
+            <div class="relative flex-1 my-2 grid grid-cols-12 gap-1 z-10">
+                
+                <!-- LEFT & CENTER: 4 CONVEYORS (3 STUFEN) -->
+                <div class="col-span-7 flex flex-col justify-between py-1 relative border-r-2 border-slate-800/10 pr-2">
                     
-                    // Respawn request after delay
-                    setTimeout(() => spawnSeniorRequest(lane), 2500);
-                } else {
-                    // Wrong delivery or senior not waiting
-                    gameState.heldItem = null;
-                    loseLife("Wrong medication delivered!");
-                    playSound(140, 0.3, 'sawtooth');
-                }
-                render();
-            }
-        }
-<!-- ... existing code ... -->
-        // --- CONTROLS ---
-        function moveMary(dir) {
-            if (gameState.gameOver || gameState.paused) return;
+                    <!-- CONVEYOR 0 -->
+                    <div class="conveyor-row flex items-center justify-between h-10 border-b border-dashed border-slate-700/20">
+                        <div class="text-[9px] font-bold text-slate-700 w-4">L1</div>
+                        <div class="flex-1 flex justify-around items-center px-2">
+                            <div class="pill-slot lcd-ghost" data-row="0" data-step="0"><i class="fa-solid fa-pills text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="0" data-step="1"><i class="fa-solid fa-capsules text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="0" data-step="2"><i class="fa-solid fa-syringe text-lg"></i></div>
+                        </div>
+                        <div class="catch-zone w-6 h-full flex items-center justify-center border-l border-slate-700/30">
+                            <i class="fa-solid fa-hand-holding-medical lcd-ghost" id="catch-0"></i>
+                        </div>
+                    </div>
 
-            if (dir === 'UP') {
-                gameState.maryPos.lane = Math.max(0, gameState.maryPos.lane - 1);
-            } else if (dir === 'DOWN') {
-                gameState.maryPos.lane = Math.min(3, gameState.maryPos.lane + 1);
-            } else if (dir === 'LEFT') {
-                gameState.maryPos.side = 'LEFT';
-            } else if (dir === 'RIGHT') {
-                gameState.maryPos.side = 'RIGHT';
-            }
+                    <!-- CONVEYOR 1 -->
+                    <div class="conveyor-row flex items-center justify-between h-10 border-b border-dashed border-slate-700/20">
+                        <div class="text-[9px] font-bold text-slate-700 w-4">L2</div>
+                        <div class="flex-1 flex justify-around items-center px-2">
+                            <div class="pill-slot lcd-ghost" data-row="1" data-step="0"><i class="fa-solid fa-prescription-bottle text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="1" data-step="1"><i class="fa-solid fa-mattress-pillow text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="1" data-step="2"><i class="fa-solid fa-pump-soap text-lg"></i></div>
+                        </div>
+                        <div class="catch-zone w-6 h-full flex items-center justify-center border-l border-slate-700/30">
+                            <i class="fa-solid fa-hand-holding-medical lcd-ghost" id="catch-1"></i>
+                        </div>
+                    </div>
 
-            playSound(400, 0.03, 'sine');
+                    <!-- CONVEYOR 2 -->
+                    <div class="conveyor-row flex items-center justify-between h-10 border-b border-dashed border-slate-700/20">
+                        <div class="text-[9px] font-bold text-slate-700 w-4">L3</div>
+                        <div class="flex-1 flex justify-around items-center px-2">
+                            <div class="pill-slot lcd-ghost" data-row="2" data-step="0"><i class="fa-solid fa-syringe text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="2" data-step="1"><i class="fa-solid fa-droplet text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="2" data-step="2"><i class="fa-solid fa-pills text-lg"></i></div>
+                        </div>
+                        <div class="catch-zone w-6 h-full flex items-center justify-center border-l border-slate-700/30">
+                            <i class="fa-solid fa-hand-holding-medical lcd-ghost" id="catch-2"></i>
+                        </div>
+                    </div>
+
+                    <!-- CONVEYOR 3 -->
+                    <div class="conveyor-row flex items-center justify-between h-10 border-b border-dashed border-slate-700/20">
+                        <div class="text-[9px] font-bold text-slate-700 w-4">L4</div>
+                        <div class="flex-1 flex justify-around items-center px-2">
+                            <div class="pill-slot lcd-ghost" data-row="3" data-step="0"><i class="fa-solid fa-mattress-pillow text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="3" data-step="1"><i class="fa-solid fa-pump-soap text-lg"></i></div>
+                            <div class="pill-slot lcd-ghost" data-row="3" data-step="2"><i class="fa-solid fa-capsules text-lg"></i></div>
+                        </div>
+                        <div class="catch-zone w-6 h-full flex items-center justify-center border-l border-slate-700/30">
+                            <i class="fa-solid fa-hand-holding-medical lcd-ghost" id="catch-3"></i>
+                        </div>
+                    </div>
+
+                    <!-- DROP BURST DANGER INDICATORS -->
+                    <div class="absolute bottom-0 left-0 right-0 flex justify-around text-xs text-slate-800 opacity-30 pointer-events-none">
+                        <i id="drop-splat-0" class="fa-solid fa-burst lcd-ghost"></i>
+                        <i id="drop-splat-1" class="fa-solid fa-burst lcd-ghost"></i>
+                        <i id="drop-splat-2" class="fa-solid fa-burst lcd-ghost"></i>
+                        <i id="drop-splat-3" class="fa-solid fa-burst lcd-ghost"></i>
+                    </div>
+                </div>
+
+                <!-- CENTER: NURSE MARY -->
+                <div class="col-span-2 flex flex-col justify-between py-1 items-center relative">
+                    <div class="mary-slot h-10 flex items-center justify-center">
+                        <i class="fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-ghost" id="mary-0"></i>
+                    </div>
+                    <div class="mary-slot h-10 flex items-center justify-center">
+                        <i class="fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-ghost" id="mary-1"></i>
+                    </div>
+                    <div class="mary-slot h-10 flex items-center justify-center">
+                        <i class="fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-ghost" id="mary-2"></i>
+                    </div>
+                    <div class="mary-slot h-10 flex items-center justify-center">
+                        <i class="fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-ghost" id="mary-3"></i>
+                    </div>
+                </div>
+
+                <!-- RIGHT SIDE: SENIOR WINDOWS (14 GEDULDSPUNKTE) -->
+                <div class="col-span-3 flex flex-col justify-between py-1 pl-1 border-l-2 border-slate-800/10">
+                    
+                    <!-- SENIOR ROW 0 -->
+                    <div class="senior-row h-10 flex items-center justify-between border-b border-dashed border-slate-700/20">
+                        <div class="flex items-center space-x-1">
+                            <i class="fa-solid fa-user-tie text-xl lcd-ghost" id="senior-icon-0"></i>
+                            <i class="fa-solid fa-face-smile text-xl lcd-ghost" id="senior-happy-0"></i>
+                            <div class="bubble border border-slate-800/40 rounded px-1 flex items-center bg-slate-800/5">
+                                <i class="lcd-ghost text-xs" id="senior-req-0"></i>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-7 gap-0.5 text-[5px]">
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-13"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-12"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-11"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-10"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-9"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-8"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-7"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-6"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-5"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-4"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-3"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-2"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-1"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-0-0"></i>
+                        </div>
+                    </div>
+
+                    <!-- SENIOR ROW 1 -->
+                    <div class="senior-row h-10 flex items-center justify-between border-b border-dashed border-slate-700/20">
+                        <div class="flex items-center space-x-1">
+                            <i class="fa-solid fa-hospital-user text-xl lcd-ghost" id="senior-icon-1"></i>
+                            <i class="fa-solid fa-face-smile text-xl lcd-ghost" id="senior-happy-1"></i>
+                            <div class="bubble border border-slate-800/40 rounded px-1 flex items-center bg-slate-800/5">
+                                <i class="lcd-ghost text-xs" id="senior-req-1"></i>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-7 gap-0.5 text-[5px]">
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-13"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-12"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-11"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-10"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-9"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-8"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-7"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-6"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-5"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-4"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-3"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-2"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-1"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-1-0"></i>
+                        </div>
+                    </div>
+
+                    <!-- SENIOR ROW 2 -->
+                    <div class="senior-row h-10 flex items-center justify-between border-b border-dashed border-slate-700/20">
+                        <div class="flex items-center space-x-1">
+                            <i class="fa-solid fa-user-tie text-xl lcd-ghost" id="senior-icon-2"></i>
+                            <i class="fa-solid fa-face-smile text-xl lcd-ghost" id="senior-happy-2"></i>
+                            <div class="bubble border border-slate-800/40 rounded px-1 flex items-center bg-slate-800/5">
+                                <i class="lcd-ghost text-xs" id="senior-req-2"></i>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-7 gap-0.5 text-[5px]">
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-13"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-12"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-11"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-10"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-9"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-8"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-7"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-6"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-5"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-4"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-3"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-2"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-1"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-2-0"></i>
+                        </div>
+                    </div>
+
+                    <!-- SENIOR ROW 3 -->
+                    <div class="senior-row h-10 flex items-center justify-between border-b border-dashed border-slate-700/20">
+                        <div class="flex items-center space-x-1">
+                            <i class="fa-solid fa-hospital-user text-xl lcd-ghost" id="senior-icon-3"></i>
+                            <i class="fa-solid fa-face-smile text-xl lcd-ghost" id="senior-happy-3"></i>
+                            <div class="bubble border border-slate-800/40 rounded px-1 flex items-center bg-slate-800/5">
+                                <i class="lcd-ghost text-xs" id="senior-req-3"></i>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-7 gap-0.5 text-[5px]">
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-13"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-12"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-11"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-10"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-9"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-8"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-7"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-6"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-5"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-4"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-3"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-2"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-1"></i>
+                            <i class="fa-solid fa-circle lcd-ghost" id="patience-3-0"></i>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+            <!-- TRAY / INVENTORY OVERLAY (3 Plätze) -->
+            <div class="relative z-10 border-t-2 border-slate-800/20 pt-1 flex justify-between items-center px-2 bg-slate-800/5 rounded">
+                <div class="flex items-center space-x-2">
+                    <span class="text-[9px] sm:text-xs font-bold text-slate-800">TRAY:</span>
+                    <div class="flex space-x-1">
+                        <div id="tray-slot-0" class="w-10 h-7 border-2 border-slate-800/60 rounded flex items-center justify-center bg-slate-800/10">
+                            <i class="fa-solid fa-box-archive text-slate-700/30 text-xs" id="tray-icon-0"></i>
+                        </div>
+                        <div id="tray-slot-1" class="w-10 h-7 border-2 border-slate-800/60 rounded flex items-center justify-center bg-slate-800/10">
+                            <i class="fa-solid fa-box-archive text-slate-700/30 text-xs" id="tray-icon-1"></i>
+                        </div>
+                        <div id="tray-slot-2" class="w-10 h-7 border-2 border-slate-800/60 rounded flex items-center justify-center bg-slate-800/10">
+                            <i class="fa-solid fa-box-archive text-slate-700/30 text-xs" id="tray-icon-2"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btn-discard" class="text-[8px] bg-slate-800/20 hover:bg-slate-800/40 text-slate-900 px-2 py-1 rounded font-bold border border-slate-800/40">
+                    DROP 1st [X]
+                </button>
+            </div>
+
+            <!-- START / OVERLAY SCREEN -->
+            <div id="screen-overlay" class="absolute inset-0 bg-emerald-900/20 backdrop-blur-[1px] z-30 flex flex-col items-center justify-center p-4 text-center">
+                <div id="overlay-title" class="text-xl sm:text-2xl font-extrabold text-slate-900 mb-2">MARY'S MEDICAMENTS</div>
+                <p id="overlay-msg" class="text-xs sm:text-sm text-slate-800 mb-4 max-w-xs leading-relaxed font-sans font-semibold">
+                    1. Mary carries up to 3 meds<br>
+                    2. Seniors are very patient now<br>
+                    3. Serve matching Seniors on right
+                </p>
+                <button id="btn-start" class="btn-retro btn-red text-white text-xs sm:text-sm px-6 py-3 rounded-full font-bold uppercase tracking-wider">
+                    START GAME A
+                </button>
+            </div>
+
+        </div>
+
+        <!-- PHYSICAL CONTROLS -->
+        <div class="w-full mt-4 sm:mt-6 grid grid-cols-12 gap-2 sm:gap-4 items-center">
             
-            // Check auto catch immediately if moved to left lane with items
-            checkAutoCatch();
-            render();
+            <!-- LEFT D-PAD -->
+            <div class="col-span-5 flex justify-center items-center">
+                <div class="relative w-28 h-28 sm:w-36 sm:h-36 bg-slate-900 rounded-full p-2 shadow-lg flex items-center justify-center">
+                    <button id="btn-up" class="btn-retro absolute top-2 w-9 h-10 sm:w-11 sm:h-12 rounded-t-md flex items-center justify-center text-white text-lg">
+                        <i class="fa-solid fa-caret-up"></i>
+                    </button>
+                    <button id="btn-down" class="btn-retro absolute bottom-2 w-9 h-10 sm:w-11 sm:h-12 rounded-b-md flex items-center justify-center text-white text-lg">
+                        <i class="fa-solid fa-caret-down"></i>
+                    </button>
+                    <button id="btn-left" class="btn-retro absolute left-2 w-10 h-9 sm:w-12 sm:h-11 rounded-l-md flex items-center justify-center text-white text-xs">
+                        <i class="fa-solid fa-hand-holding mr-0.5"></i>
+                    </button>
+                    <button id="btn-right" class="btn-retro absolute right-2 w-10 h-9 sm:w-12 sm:h-11 rounded-r-md flex items-center justify-center text-white text-xs">
+                        <i class="fa-solid fa-user-check ml-0.5"></i>
+                    </button>
+                    <div class="w-7 h-7 sm:w-9 sm:h-9 bg-slate-800 rounded-full border border-slate-700"></div>
+                </div>
+            </div>
+
+            <!-- CENTER SYSTEM BUTTONS -->
+            <div class="col-span-2 flex flex-col items-center justify-center space-y-3">
+                <div class="flex flex-col items-center">
+                    <button id="btn-sound" class="btn-small w-8 h-8 sm:w-10 sm:h-10 rounded-full text-slate-800 flex items-center justify-center text-xs">
+                        <i class="fa-solid fa-volume-high" id="sound-icon"></i>
+                    </button>
+                    <span class="text-[7px] sm:text-[9px] font-bold text-amber-100 mt-1">SOUND</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <button id="btn-reset" class="btn-small w-8 h-8 sm:w-10 sm:h-10 rounded-full text-slate-800 flex items-center justify-center text-xs">
+                        <i class="fa-solid fa-rotate-left"></i>
+                    </button>
+                    <span class="text-[7px] sm:text-[9px] font-bold text-amber-100 mt-1">RESET</span>
+                </div>
+            </div>
+
+            <!-- RIGHT ACTION BUTTONS -->
+            <div class="col-span-5 flex justify-center items-center space-x-2 sm:space-x-4">
+                <div class="flex flex-col items-center">
+                    <button id="btn-action-catch" class="btn-retro btn-red w-14 h-14 sm:w-18 sm:h-18 rounded-full flex flex-col items-center justify-center text-white text-xs font-bold shadow-md">
+                        <i class="fa-solid fa-hand text-base mb-1"></i>
+                        <span>CATCH</span>
+                    </button>
+                    <span class="text-[8px] sm:text-[10px] font-bold text-amber-100 mt-1">BELT</span>
+                </div>
+                <div class="flex flex-col items-center">
+                    <button id="btn-action-serve" class="btn-retro btn-red w-14 h-14 sm:w-18 sm:h-18 rounded-full flex flex-col items-center justify-center text-white text-xs font-bold shadow-md">
+                        <i class="fa-solid fa-file-medical text-base mb-1"></i>
+                        <span>SERVE</span>
+                    </button>
+                    <span class="text-[8px] sm:text-[10px] font-bold text-amber-100 mt-1">WINDOW</span>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="mt-4 text-[9px] sm:text-[11px] text-amber-200/80 text-center font-sans">
+            <span class="font-bold">Keyboard Controls:</span> [Arrow Up/Down] Move | [Arrow Left / A] Left side | [Arrow Right / D / Space] Serve | [X / Delete] Drop
+        </div>
+
+    </div>
+
+    <script>
+        const MAX_LIVES = 8;
+
+        const MEDICINES = [
+            { id: 'pill', icon: 'fa-solid fa-pills', name: 'PILLS' },
+            { id: 'capsule', icon: 'fa-solid fa-capsules', name: 'CAPSULES' },
+            { id: 'syringe', icon: 'fa-solid fa-syringe', name: 'SYRINGE' },
+            { id: 'drops', icon: 'fa-solid fa-droplet', name: 'DROPS' },
+            { id: 'bottle', icon: 'fa-solid fa-prescription-bottle', name: 'BOTTLE' },
+            { id: 'blister', icon: 'fa-solid fa-mattress-pillow', name: 'BLISTER PACK' },
+            { id: 'cream', icon: 'fa-solid fa-pump-soap', name: 'CREAM TUBE' }
+        ];
+
+        class LCDAudio {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+
+            playTone(freq, duration, type = 'square') {
+                if (!this.enabled) return;
+                this.init();
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.value = freq;
+                    gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch(e) {}
+            }
+
+            beepMove() { this.playTone(700, 0.04); }
+            beepCatch() { this.playTone(1100, 0.08); }
+            beepServe() { 
+                this.playTone(900, 0.06); 
+                setTimeout(() => this.playTone(1400, 0.1), 70);
+            }
+            beepDiscard() { this.playTone(400, 0.06); }
+            beepError() {
+                this.playTone(280, 0.15, 'sawtooth');
+                setTimeout(() => this.playTone(180, 0.25, 'sawtooth'), 150);
+            }
+            beepGameOver() {
+                const notes = [380, 320, 260, 200];
+                notes.forEach((freq, i) => {
+                    setTimeout(() => this.playTone(freq, 0.2, 'sawtooth'), i * 200);
+                });
+            }
         }
 
-        document.addEventListener('keydown', (e) => {
-            if (['ArrowUp', 'KeyW'].includes(e.code)) moveMary('UP');
-            if (['ArrowDown', 'KeyS'].includes(e.code)) moveMary('DOWN');
-            if (['ArrowLeft', 'KeyA'].includes(e.code)) moveMary('LEFT');
-            if (['ArrowRight', 'KeyD'].includes(e.code)) moveMary('RIGHT');
-            if (['Space', 'Enter', 'KeyF'].includes(e.code)) tryCatchOrDeliver();
-        });
-<!-- ... existing code ... -->
+        const audio = new LCDAudio();
+
+        class MaryGame {
+            constructor() {
+                this.score = 0;
+                this.highScore = parseInt(localStorage.getItem('mary_high_score') || '0');
+                this.lives = MAX_LIVES;
+                this.maryPos = 0;
+                this.marySide = 'left';
+                this.inventory = [];
+
+                this.conveyors = [
+                    [null, null, null],
+                    [null, null, null],
+                    [null, null, null],
+                    [null, null, null]
+                ];
+
+                this.seniors = [null, null, null, null];
+
+                this.isPlaying = false;
+                this.tickInterval = null;
+                this.baseSpeed = 1300;
+                this.currentSpeed = 1300;
+
+                this.initDOM();
+                this.bindEvents();
+                this.updateDisplay();
+            }
+
+            initDOM() {
+                this.dom = {
+                    score: document.getElementById('score-display'),
+                    overlay: document.getElementById('screen-overlay'),
+                    overlayTitle: document.getElementById('overlay-title'),
+                    overlayMsg: document.getElementById('overlay-msg'),
+                    btnStart: document.getElementById('btn-start'),
+                    soundBtn: document.getElementById('btn-sound'),
+                    soundIcon: document.getElementById('sound-icon'),
+                    resetBtn: document.getElementById('btn-reset'),
+                    discardBtn: document.getElementById('btn-discard'),
+                    speedText: document.getElementById('speed-level-text')
+                };
+            }
+
+            bindEvents() {
+                document.getElementById('btn-up').addEventListener('click', () => this.moveMary(-1));
+                document.getElementById('btn-down').addEventListener('click', () => this.moveMary(1));
+                
+                document.getElementById('btn-left').addEventListener('click', () => { this.marySide = 'left'; this.checkAutoCatch(); this.updateDisplay(); });
+                document.getElementById('btn-action-catch').addEventListener('click', () => { this.marySide = 'left'; this.checkAutoCatch(); this.updateDisplay(); });
+
+                document.getElementById('btn-right').addEventListener('click', () => this.serveSenior());
+                document.getElementById('btn-action-serve').addEventListener('click', () => this.serveSenior());
+
+                this.dom.discardBtn.addEventListener('click', () => this.discardItem());
+
+                this.dom.btnStart.addEventListener('click', () => this.startGame());
+                this.dom.resetBtn.addEventListener('click', () => this.resetGame());
+                this.dom.soundBtn.addEventListener('click', () => {
+                    audio.enabled = !audio.enabled;
+                    this.dom.soundIcon.className = audio.enabled ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
+                });
+
+                window.addEventListener('keydown', (e) => {
+                    if (!this.isPlaying && (e.code === 'Enter' || e.code === 'Space')) {
+                        this.startGame();
+                        return;
+                    }
+
+                    switch(e.code) {
+                        case 'ArrowUp':
+                        case 'KeyW':
+                            this.moveMary(-1);
+                            break;
+                        case 'ArrowDown':
+                        case 'KeyS':
+                            this.moveMary(1);
+                            break;
+                        case 'ArrowLeft':
+                        case 'KeyA':
+                            this.marySide = 'left';
+                            this.checkAutoCatch();
+                            this.updateDisplay();
+                            break;
+                        case 'ArrowRight':
+                        case 'KeyD':
+                        case 'Space':
+                            this.serveSenior();
+                            break;
+                        case 'KeyX':
+                        case 'Delete':
+                            this.discardItem();
+                            break;
+                    }
+                });
+            }
+
+            startGame() {
+                this.score = 0;
+                this.lives = MAX_LIVES;
+                this.maryPos = 0;
+                this.inventory = [];
+                this.marySide = 'left';
+                this.conveyors = [
+                    [null, null, null],
+                    [null, null, null],
+                    [null, null, null],
+                    [null, null, null]
+                ];
+                this.seniors = [null, null, null, null];
+                this.isPlaying = true;
+                this.currentSpeed = this.baseSpeed;
+
+                this.dom.overlay.classList.add('hidden');
+                audio.beepServe();
+
+                if (this.tickInterval) clearInterval(this.tickInterval);
+                this.tickInterval = setInterval(() => this.gameTick(), this.currentSpeed);
+
+                this.updateDisplay();
+            }
+
+            resetGame() {
+                if (this.tickInterval) clearInterval(this.tickInterval);
+                this.isPlaying = false;
+                this.dom.overlayTitle.innerText = "MARY'S MEDICAMENTS";
+                this.dom.overlayMsg.innerHTML = "Mary carries up to 3 meds & seniors are very patient!";
+                this.dom.btnStart.innerText = "START GAME A";
+                this.dom.overlay.classList.remove('hidden');
+                this.updateDisplay();
+            }
+
+            gameOver() {
+                if (this.tickInterval) clearInterval(this.tickInterval);
+                this.isPlaying = false;
+                audio.beepGameOver();
+
+                if (this.score > this.highScore) {
+                    this.highScore = this.score;
+                    localStorage.setItem('mary_high_score', this.highScore.toString());
+                }
+
+                this.dom.overlayTitle.innerText = "GAME OVER";
+                this.dom.overlayMsg.innerHTML = `FINAL SCORE: <b>${this.score}</b><br>HIGH SCORE: <b>${this.highScore}</b>`;
+                this.dom.btnStart.innerText = "TRY AGAIN";
+                this.dom.overlay.classList.remove('hidden');
+            }
+
+            moveMary(dir) {
+                if (!this.isPlaying) return;
+                const newPos = this.maryPos + dir;
+                if (newPos >= 0 && newPos <= 3) {
+                    this.maryPos = newPos;
+                    this.marySide = 'left';
+                    audio.beepMove();
+                    this.checkAutoCatch();
+                    this.updateDisplay();
+                }
+            }
+
+            checkAutoCatch() {
+                if (this.inventory.length < 3 && this.marySide === 'left') {
+                    const row = this.maryPos;
+                    const pillAtEnd = this.conveyors[row][2];
+                    if (pillAtEnd) {
+                        this.inventory.push(pillAtEnd);
+                        this.conveyors[row][2] = null;
+                        this.score += 5;
+                        audio.beepCatch();
+                    }
+                }
+            }
+
+            discardItem() {
+                if (!this.isPlaying || this.inventory.length === 0) return;
+                this.inventory.shift();
+                audio.beepDiscard();
+                this.updateDisplay();
+            }
+
+            serveSenior() {
+                if (!this.isPlaying) return;
+                this.marySide = 'right';
+
+                const row = this.maryPos;
+                const senior = this.seniors[row];
+
+                if (senior && this.inventory.length > 0 && !senior.happy) {
+                    const matchIndex = this.inventory.findIndex(med => med.id === senior.reqMed.id);
+
+                    if (matchIndex !== -1) {
+                        senior.happy = true;
+                        senior.happyTicks = 2;
+                        this.inventory.splice(matchIndex, 1);
+                        this.score += 10;
+                        audio.beepServe();
+                    } else {
+                        this.loseLife();
+                    }
+                } else if (!senior) {
+                    audio.beepMove();
+                } else if (this.inventory.length === 0) {
+                    audio.beepError();
+                }
+
+                this.updateDisplay();
+            }
+
+            loseLife() {
+                this.lives--;
+                audio.beepError();
+                
+                if (this.lives <= 0) {
+                    this.gameOver();
+                } else {
+                    this.updateDisplay();
+                }
+            }
+
+            gameTick() {
+                if (!this.isPlaying) return;
+
+                // 1. Clear Happy Seniors
+                for (let r = 0; r < 4; r++) {
+                    if (this.seniors[r] && this.seniors[r].happy) {
+                        this.seniors[r].happyTicks--;
+                        if (this.seniors[r].happyTicks <= 0) {
+                            this.seniors[r] = null;
+                        }
+                    }
+                }
+
+                // 2. Conveyor Belt Movement & Automatisches Fangen bei Ankunft auf Index 2
+                for (let r = 0; r < 4; r++) {
+                    if (this.marySide === 'left' && this.maryPos === r && this.conveyors[r][2] !== null && this.inventory.length < 3) {
+                        this.inventory.push(this.conveyors[r][2]);
+                        this.conveyors[r][2] = null;
+                        this.score += 5;
+                        audio.beepCatch();
+                    }
+
+                    if (this.conveyors[r][2] !== null) {
+                        this.triggerDropSplat(r);
+                        this.conveyors[r][2] = null;
+                        this.loseLife();
+                        if (!this.isPlaying) return;
+                    }
+
+                    this.conveyors[r][2] = this.conveyors[r][1];
+                    this.conveyors[r][1] = this.conveyors[r][0];
+                    this.conveyors[r][0] = null;
+
+                    if (this.marySide === 'left' && this.maryPos === r && this.conveyors[r][2] !== null && this.inventory.length < 3) {
+                        this.inventory.push(this.conveyors[r][2]);
+                        this.conveyors[r][2] = null;
+                        this.score += 5;
+                        audio.beepCatch();
+                    }
+                }
+
+                // 3. Spawn New Items on Conveyor
+                let totalItems = 0;
+                for (let r = 0; r < 4; r++) {
+                    for (let s = 0; s < 3; s++) {
+                        if (this.conveyors[r][s] !== null) totalItems++;
+                    }
+                }
+
+                const maxAllowed = this.score < 30 ? 1 : (this.score < 60 ? 2 : 3);
+                if (totalItems < maxAllowed && Math.random() < 0.5) {
+                    const r = Math.floor(Math.random() * 4);
+                    if (this.conveyors[r][0] === null) {
+                        this.conveyors[r][0] = MEDICINES[Math.floor(Math.random() * MEDICINES.length)];
+                    }
+                }
+
+                // 4. Update Seniors Patience (Sehr hoch: 14 Schritte)
+                for (let r = 0; r < 4; r++) {
+                    if (this.seniors[r] && !this.seniors[r].happy) {
+                        this.seniors[r].patience--;
+                        if (this.seniors[r].patience < 0) {
+                            this.seniors[r] = null;
+                            this.loseLife();
+                            if (!this.isPlaying) return;
+                        }
+                    }
+                }
+
+                // 5. Spawn Matching Seniors (Priorisiere Medikamente die auf den Bändern sind)
+                let activeSeniors = this.seniors.filter(s => s !== null && !s.happy).length;
+                const maxSeniors = this.score < 20 ? 1 : (this.score < 50 ? 2 : 3);
+
+                if (activeSeniors < maxSeniors && Math.random() < 0.45) {
+                    const emptyRows = [];
+                    for (let r = 0; r < 4; r++) {
+                        if (this.seniors[r] === null) emptyRows.push(r);
+                    }
+                    if (emptyRows.length > 0) {
+                        const targetRow = emptyRows[Math.floor(Math.random() * emptyRows.length)];
+                        
+                        let availableMeds = [];
+                        for (let r = 0; r < 4; r++) {
+                            for (let s = 0; s < 3; s++) {
+                                if (this.conveyors[r][s] !== null) {
+                                    availableMeds.push(this.conveyors[r][s]);
+                                }
+                            }
+                        }
+
+                        let chosenMed;
+                        if (availableMeds.length > 0 && Math.random() < 0.9) {
+                            chosenMed = availableMeds[Math.floor(Math.random() * availableMeds.length)];
+                        } else {
+                            chosenMed = MEDICINES[Math.floor(Math.random() * MEDICINES.length)];
+                        }
+
+                        this.seniors[targetRow] = {
+                            reqMed: chosenMed,
+                            patience: 14, // Extrem geduldig
+                            happy: false,
+                            happyTicks: 0
+                        };
+                    }
+                }
+
+                // 6. Balanced Speed Scaling
+                const speedStep = Math.floor(this.score / 15);
+                const newSpeed = Math.max(500, this.baseSpeed - (speedStep * 60));
+                this.dom.speedText.innerText = `SPEED: LVL ${speedStep + 1}`;
+
+                if (newSpeed !== this.currentSpeed) {
+                    this.currentSpeed = newSpeed;
+                    clearInterval(this.tickInterval);
+                    this.tickInterval = setInterval(() => this.gameTick(), this.currentSpeed);
+                }
+
+                this.updateDisplay();
+            }
+
+            triggerDropSplat(row) {
+                const splat = document.getElementById(`drop-splat-${row}`);
+                if (splat) {
+                    splat.className = 'fa-solid fa-burst lcd-active text-red-900';
+                    setTimeout(() => {
+                        splat.className = 'fa-solid fa-burst lcd-ghost';
+                    }, 400);
+                }
+            }
+
+            updateDisplay() {
+                this.dom.score.innerText = String(this.score).padStart(4, '0');
+
+                // 8 Lives
+                for (let i = 0; i < MAX_LIVES; i++) {
+                    const lifeEl = document.getElementById(`life-${i}`);
+                    if (lifeEl) {
+                        if (i < (MAX_LIVES - this.lives)) {
+                            lifeEl.className = 'fa-solid fa-heart-crack lcd-active text-slate-900';
+                        } else {
+                            lifeEl.className = 'fa-solid fa-heart-crack lcd-ghost';
+                        }
+                    }
+                }
+
+                // Nurse Mary
+                for (let i = 0; i < 4; i++) {
+                    const maryEl = document.getElementById(`mary-${i}`);
+                    const catchEl = document.getElementById(`catch-${i}`);
+
+                    if (i === this.maryPos) {
+                        maryEl.className = 'fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-active';
+                        catchEl.className = this.marySide === 'left' ? 'fa-solid fa-hand-holding-medical lcd-active' : 'fa-solid fa-hand-holding-medical lcd-ghost';
+                    } else {
+                        maryEl.className = 'fa-solid fa-user-nurse text-2xl sm:text-3xl lcd-ghost';
+                        catchEl.className = 'fa-solid fa-hand-holding-medical lcd-ghost';
+                    }
+                }
+
+                // Conveyor Items (3 Stufen)
+                for (let r = 0; r < 4; r++) {
+                    for (let s = 0; s < 3; s++) {
+                        const slotEl = document.querySelector(`.pill-slot[data-row="${r}"][data-step="${s}"]`);
+                        const pillData = this.conveyors[r][s];
+                        if (slotEl) {
+                            if (pillData) {
+                                slotEl.innerHTML = `<i class="${pillData.icon} text-lg"></i>`;
+                                slotEl.className = 'pill-slot lcd-active';
+                            } else {
+                                slotEl.innerHTML = `<i class="${MEDICINES[0].icon} text-lg"></i>`;
+                                slotEl.className = 'pill-slot lcd-ghost';
+                            }
+                        }
+                    }
+                }
+
+                // Senior Counters (14 Geduldspunkte)
+                for (let r = 0; r < 4; r++) {
+                    const seniorIcon = document.getElementById(`senior-icon-${r}`);
+                    const seniorHappy = document.getElementById(`senior-happy-${r}`);
+                    const reqIcon = document.getElementById(`senior-req-${r}`);
+                    const seniorData = this.seniors[r];
+
+                    if (seniorData) {
+                        if (seniorData.happy) {
+                            seniorIcon.className = (r % 2 === 0 ? 'fa-solid fa-user-tie' : 'fa-solid fa-hospital-user') + ' text-xl lcd-ghost';
+                            seniorHappy.className = 'fa-solid fa-face-smile text-xl lcd-active';
+                            reqIcon.className = 'fa-solid fa-check lcd-active text-xs';
+                        } else {
+                            seniorIcon.className = (r % 2 === 0 ? 'fa-solid fa-user-tie' : 'fa-solid fa-hospital-user') + ' text-xl lcd-active';
+                            seniorHappy.className = 'fa-solid fa-face-smile text-xl lcd-ghost';
+                            reqIcon.className = `${seniorData.reqMed.icon} lcd-active text-xs`;
+                        }
+
+                        for (let p = 0; p < 14; p++) {
+                            const pDot = document.getElementById(`patience-${r}-${p}`);
+                            if (pDot) {
+                                if (!seniorData.happy && p <= seniorData.patience - 1) {
+                                    pDot.className = (seniorData.patience <= 3 && p === 0) ? 'fa-solid fa-circle lcd-warning' : 'fa-solid fa-circle lcd-active';
+                                } else {
+                                    pDot.className = 'fa-solid fa-circle lcd-ghost';
+                                }
+                            }
+                        }
+                    } else {
+                        seniorIcon.className = (r % 2 === 0 ? 'fa-solid fa-user-tie' : 'fa-solid fa-hospital-user') + ' text-xl lcd-ghost';
+                        seniorHappy.className = 'fa-solid fa-face-smile text-xl lcd-ghost';
+                        reqIcon.className = 'lcd-ghost text-xs';
+                        for (let p = 0; p < 14; p++) {
+                            const pDot = document.getElementById(`patience-${r}-${p}`);
+                            if (pDot) pDot.className = 'fa-solid fa-circle lcd-ghost';
+                        }
+                    }
+                }
+
+                // Inventory Tray (3 Slots)
+                for (let slotIdx = 0; slotIdx < 3; slotIdx++) {
+                    const iconEl = document.getElementById(`tray-icon-${slotIdx}`);
+                    const slotContainer = document.getElementById(`tray-slot-${slotIdx}`);
+                    const item = this.inventory[slotIdx];
+
+                    if (item) {
+                        iconEl.className = `${item.icon} text-slate-900 text-xs lcd-active`;
+                        slotContainer.className = 'w-10 h-7 border-2 border-slate-800/80 rounded flex items-center justify-center bg-slate-800/20';
+                    } else {
+                        iconEl.className = 'fa-solid fa-box-archive text-slate-700/30 text-xs';
+                        slotContainer.className = 'w-10 h-7 border-2 border-slate-800/30 rounded flex items-center justify-center bg-slate-800/5';
+                    }
+                }
+
+                if (this.inventory.length > 0) {
+                    this.dom.discardBtn.classList.remove('opacity-40');
+                } else {
+                    this.dom.discardBtn.classList.add('opacity-40');
+                }
+            }
+        }
+
+        window.onload = function() {
+            window.gameEngine = new MaryGame();
+        };
+    </script>
+</body>
+</html>
