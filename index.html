@@ -1,0 +1,197 @@
+<!-- ... existing code ... -->
+        // --- GAME LOGIC ---
+        function updateGame() {
+            if (gameState.gameOver || gameState.paused) return;
+
+            gameState.tick++;
+
+            // Spawn medications
+            if (gameState.tick % gameState.spawnInterval === 0) {
+                spawnMedication();
+            }
+
+            // Move medications along conveyors
+            if (gameState.tick % gameState.conveyorSpeed === 0) {
+                moveConveyors();
+            }
+
+            // Update senior patience
+            if (gameState.tick % 60 === 0) { // check every ~1 sec
+                updateSeniors();
+            }
+
+            // Try automatic catch on every frame if Mary is standing at the conveyor end
+            checkAutoCatch();
+
+            // Increase difficulty over time
+            if (gameState.tick % 600 === 0 && gameState.conveyorSpeed > 15) {
+                gameState.conveyorSpeed--;
+                playSound(600, 0.05, 'triangle');
+            }
+
+            render();
+        }
+
+        function checkAutoCatch() {
+            // If Mary is on left side and her hands are empty, check if item reached end of her current lane
+            if (gameState.maryPos.side === 'LEFT' && gameState.heldItem === null) {
+                const lane = gameState.maryPos.lane;
+                const itemsInLane = gameState.conveyors[lane];
+                // Item at end of conveyor is at pos 3
+                const caughtIdx = itemsInLane.findIndex(item => item.pos === 3);
+                if (caughtIdx !== -1) {
+                    catchItem(lane, caughtIdx);
+                }
+            }
+        }
+
+        function spawnMedication() {
+            // Find lanes that don't have item at pos 0
+            const availableLanes = [];
+            for (let i = 0; i < 4; i++) {
+                if (!gameState.conveyors[i].some(item => item.pos === 0)) {
+                    availableLanes.push(i);
+                }
+            }
+            if (availableLanes.length === 0) return;
+
+            const lane = availableLanes[Math.floor(Math.random() * availableLanes.length)];
+            const type = MED_TYPES[Math.floor(Math.random() * MED_TYPES.length)];
+
+            gameState.conveyors[lane].push({
+                type: type,
+                pos: 0
+            });
+            playSound(300, 0.04, 'sine');
+        }
+
+        function moveConveyors() {
+            for (let l = 0; l < 4; l++) {
+                const lane = gameState.conveyors[l];
+                for (let i = lane.length - 1; i >= 0; i--) {
+                    lane[i].pos++;
+                    // If medication falls off end of conveyor without being caught
+                    if (lane[i].pos > 3) {
+                        lane.splice(i, 1);
+                        loseLife("Pill dropped!");
+                        playSound(150, 0.3, 'sawtooth');
+                    }
+                }
+            }
+
+            // Re-check auto catch immediately after conveyor movement
+            checkAutoCatch();
+        }
+
+        function updateSeniors() {
+            for (let i = 0; i < 4; i++) {
+                const s = gameState.seniors[i];
+                if (s.active) {
+                    s.patience--;
+                    if (s.patience <= 0) {
+                        // Senior ran out of patience!
+                        s.active = false;
+                        loseLife(`Senior on Lane ${i+1} ran out of patience!`);
+                        playSound(180, 0.4, 'sawtooth');
+                        // Spawn new request after delay
+                        setTimeout(() => spawnSeniorRequest(i), 3000);
+                    }
+                } else {
+                    // Chance to request medication if empty
+                    if (Math.random() < 0.3) {
+                        spawnSeniorRequest(i);
+                    }
+                }
+            }
+        }
+
+        function spawnSeniorRequest(lane) {
+            if (gameState.gameOver) return;
+            gameState.seniors[lane] = {
+                active: true,
+                med: MED_TYPES[Math.floor(Math.random() * MED_TYPES.length)],
+                patience: 15 // 15 seconds
+            };
+            playSound(523, 0.1, 'sine');
+        }
+
+        function catchItem(lane, itemIndex) {
+            const item = gameState.conveyors[lane][itemIndex];
+            gameState.heldItem = item.type;
+            gameState.conveyors[lane].splice(itemIndex, 1);
+            playSound(800, 0.1, 'square');
+            render();
+        }
+
+        function tryCatchOrDeliver() {
+            if (gameState.gameOver) return;
+
+            if (gameState.maryPos.side === 'LEFT') {
+                // Manual catch attempt
+                if (gameState.heldItem !== null) return; // Tray full
+
+                const lane = gameState.maryPos.lane;
+                const itemsInLane = gameState.conveyors[lane];
+                // Can catch if at position 3 (end of belt) or position 2 (close)
+                const caughtIdx = itemsInLane.findIndex(item => item.pos >= 2);
+                if (caughtIdx !== -1) {
+                    catchItem(lane, caughtIdx);
+                } else {
+                    playSound(200, 0.05, 'square'); // Miss sound
+                }
+            } else {
+                // RIGHT side: Deliver medicine to Senior
+                if (gameState.heldItem === null) return; // Nothing to deliver
+
+                const lane = gameState.maryPos.lane;
+                const senior = gameState.seniors[lane];
+
+                if (senior.active && senior.med === gameState.heldItem) {
+                    // Correct delivery!
+                    gameState.score += 10;
+                    document.getElementById('lcd-score').textContent = String(gameState.score).padStart(4, '0');
+                    senior.active = false;
+                    gameState.heldItem = null;
+                    playSound(1046, 0.15, 'triangle');
+                    
+                    // Respawn request after delay
+                    setTimeout(() => spawnSeniorRequest(lane), 2500);
+                } else {
+                    // Wrong delivery or senior not waiting
+                    gameState.heldItem = null;
+                    loseLife("Wrong medication delivered!");
+                    playSound(140, 0.3, 'sawtooth');
+                }
+                render();
+            }
+        }
+<!-- ... existing code ... -->
+        // --- CONTROLS ---
+        function moveMary(dir) {
+            if (gameState.gameOver || gameState.paused) return;
+
+            if (dir === 'UP') {
+                gameState.maryPos.lane = Math.max(0, gameState.maryPos.lane - 1);
+            } else if (dir === 'DOWN') {
+                gameState.maryPos.lane = Math.min(3, gameState.maryPos.lane + 1);
+            } else if (dir === 'LEFT') {
+                gameState.maryPos.side = 'LEFT';
+            } else if (dir === 'RIGHT') {
+                gameState.maryPos.side = 'RIGHT';
+            }
+
+            playSound(400, 0.03, 'sine');
+            
+            // Check auto catch immediately if moved to left lane with items
+            checkAutoCatch();
+            render();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (['ArrowUp', 'KeyW'].includes(e.code)) moveMary('UP');
+            if (['ArrowDown', 'KeyS'].includes(e.code)) moveMary('DOWN');
+            if (['ArrowLeft', 'KeyA'].includes(e.code)) moveMary('LEFT');
+            if (['ArrowRight', 'KeyD'].includes(e.code)) moveMary('RIGHT');
+            if (['Space', 'Enter', 'KeyF'].includes(e.code)) tryCatchOrDeliver();
+        });
+<!-- ... existing code ... -->
